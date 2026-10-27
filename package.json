@@ -1,0 +1,19 @@
+{
+  "name": "al-qadr-ota",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.12.1",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @alqadr/web --filter @alqadr/api dev",
+    "dev:web": "pnpm --filter @alqadr/web dev",
+    "dev:api": "pnpm --filter @alqadr/api start:dev",
+    "lint:schema": "node scripts/lint-schema.mjs apps/api/prisma/schema.prisma",
+    "prisma:validate": "pnpm --filter @alqadr/api exec prisma validate --schema prisma/schema.prisma",
+    "prisma:format": "pnpm --filter @alqadr/api exec prisma format --schema prisma/schema.prisma",
+    "prisma:generate": "pnpm --filter @alqadr/api exec prisma generate --schema prisma/schema.prisma",
+    "build": "pnpm --recursive build"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}
