@@ -1,0 +1,1145 @@
+// =============================================================================
+// AL-QADR TRAVELS & TOURS — OTA PLATFORM
+// Prisma schema — PHASE 1 FOUNDATION, REVISION 2 (designed for Phases 2-10)
+//
+// Conventions (apply to the WHOLE application, no exceptions)
+//   * Prisma/app code: camelCase fields, PascalCase models.
+//   * PostgreSQL: snake_case tables (plural) and snake_case columns.
+//       -> every model has @@map("snake_plural"), every multi-word field has @map("snake_case"),
+//          every enum has @@map("snake_case"). Enum VALUES stay UPPER_SNAKE.
+//       -> CI check: no identifier in information_schema contains an upper-case letter.
+//   * Targets Prisma 6.x (Prisma 7 moves `url` to prisma.config.ts; nothing else changes).
+//   * PK: UUID (gen_random_uuid()), immutable. Business IDs: DB-generated via next_business_id('<key>').
+//   * Money: Decimal(18,2). Never Float.  Timestamps: timestamptz (UTC).
+//   * [RAW SQL] = enforced in hand-written migrations (CHECKs, partial unique indexes, triggers,
+//     grants) because Prisma cannot express them. Raw SQL uses the snake_case column names.
+//   * Later phases ADD tables pointing at these. They do not alter these in breaking ways.
+//     Ledger links are polymorphic: (reference_type, reference_id, reference_no).
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+// =============================================================================
+// ENUMS
+// =============================================================================
+
+enum UserType {
+  STAFF
+  PARTNER_USER
+  CUSTOMER
+
+  @@map("user_type")
+}
+
+enum UserStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  LOCKED
+  DEACTIVATED
+
+  @@map("user_status")
+}
+
+enum RoleScope {
+  PLATFORM
+  PARTNER
+  CUSTOMER
+
+  @@map("role_scope")
+}
+
+enum DataScope {
+  ALL
+  ZONE
+  PARTNER_TREE
+  OWN_PARTNER
+  OWN
+
+  @@map("data_scope")
+}
+
+enum PermissionEffect {
+  GRANT
+  DENY
+
+  @@map("permission_effect")
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  ON_LEAVE
+  INACTIVE
+  TERMINATED
+
+  @@map("employee_status")
+}
+
+enum UserTokenType {
+  PASSWORD_RESET
+  EMAIL_VERIFY
+  INVITE
+
+  @@map("user_token_type")
+}
+
+// INHERIT = decided by role/permission flags + system policy; REQUIRED = force 2FA for this user
+// (this is how 2FA is switched on later for individual B2B agents without code changes).
+enum TwoFactorPolicy {
+  INHERIT
+  REQUIRED
+
+  @@map("two_factor_policy")
+}
+
+enum TwoFactorMethod {
+  TOTP // authenticator apps (Google Authenticator, Microsoft Authenticator, Authy, 1Password...)
+  // WEBAUTHN, SMS_OTP can be added later with ALTER TYPE ... ADD VALUE
+
+  @@map("two_factor_method")
+}
+
+enum TwoFactorStatus {
+  PENDING // secret generated, not yet confirmed with a valid code
+  ACTIVE
+  DISABLED
+
+  @@map("two_factor_status")
+}
+
+enum PartnerType {
+  B2B_PARTNER // root partner (parent is NULL)
+  SUB_PARTNER // has a parent; remains valid at any future depth
+
+  @@map("partner_type")
+}
+
+enum PartnerStatus {
+  REQUESTED
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+  BLOCKED
+
+  @@map("partner_status")
+}
+
+enum PartnerGroupType {
+  MARKUP
+  DISCOUNT
+  COMMISSION
+
+  @@map("partner_group_type")
+}
+
+enum SupplierType {
+  GDS
+  FLIGHT_API
+  HOTEL_API
+  VISA_API
+  UMRAH_API
+  PAYMENT_GATEWAY
+
+  @@map("supplier_type")
+}
+
+enum SupplierStatus {
+  ACTIVE
+  INACTIVE
+  MAINTENANCE
+
+  @@map("supplier_status")
+}
+
+enum SupplierEnvironment {
+  MOCK
+  SANDBOX
+  PRODUCTION
+
+  @@map("supplier_environment")
+}
+
+enum ApiDirection {
+  OUTBOUND
+  INBOUND
+
+  @@map("api_direction")
+}
+
+enum ActorType {
+  USER
+  SYSTEM
+  JOB
+  WEBHOOK
+
+  @@map("actor_type")
+}
+
+enum AuditResult {
+  SUCCESS
+  FAILURE
+  DENIED
+
+  @@map("audit_result")
+}
+
+enum EntrySide {
+  DEBIT
+  CREDIT
+
+  @@map("entry_side")
+}
+
+enum LedgerAccountType {
+  PARTNER_WALLET
+  PLATFORM_CASH
+  PLATFORM_SALES
+  PLATFORM_SUPPLIER_PAYABLE
+  PLATFORM_SERVICE_INCOME
+  PLATFORM_COMMISSION_EXPENSE
+  PLATFORM_REFUND_CLEARING
+  PLATFORM_SUSPENSE
+
+  @@map("ledger_account_type")
+}
+
+enum LedgerAccountStatus {
+  ACTIVE
+  FROZEN
+  CLOSED
+
+  @@map("ledger_account_status")
+}
+
+enum LedgerTransactionType {
+  DEPOSIT
+  BOOKING
+  TICKET
+  REFUND
+  REISSUE
+  VOID
+  ADJUSTMENT
+  COMMISSION
+  SERVICE_FEE
+  TRANSFER
+  REVERSAL
+  CREDIT_ADJUSTMENT
+
+  @@map("ledger_transaction_type")
+}
+
+enum LedgerTransactionStatus {
+  PENDING
+  POSTED
+  FAILED
+  REVERSED
+
+  @@map("ledger_transaction_status")
+}
+
+// Extend with ALTER TYPE ... ADD VALUE as modules arrive (non-breaking).
+enum LedgerReferenceType {
+  DEPOSIT
+  BOOKING
+  TICKET
+  REFUND
+  REISSUE
+  VOID
+  INVOICE
+  ANCILLARY
+  HOTEL_BOOKING
+  VISA_APPLICATION
+  UMRAH_BOOKING
+  TRANSFER
+  CREDIT
+  MANUAL
+  SYSTEM
+
+  @@map("ledger_reference_type")
+}
+
+enum HoldStatus {
+  ACTIVE
+  CAPTURED
+  RELEASED
+  EXPIRED
+
+  @@map("hold_status")
+}
+
+enum CreditLineStatus {
+  ACTIVE
+  SUSPENDED
+  CLOSED
+
+  @@map("credit_line_status")
+}
+
+enum ReconciliationStatus {
+  MATCHED
+  MISMATCH
+
+  @@map("reconciliation_status")
+}
+
+enum IdempotencyScopeType {
+  USER
+  PARTNER
+  SYSTEM
+
+  @@map("idempotency_scope_type")
+}
+
+enum IdempotencyStatus {
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+
+  @@map("idempotency_status")
+}
+
+enum IdResetPolicy {
+  NEVER
+  YEARLY
+
+  @@map("id_reset_policy")
+}
+
+enum OutboxStatus {
+  PENDING
+  PUBLISHED
+  FAILED
+
+  @@map("outbox_status")
+}
+
+// =============================================================================
+// 1. IDENTITY & ACCESS
+// =============================================================================
+
+// One login identity for staff, partner users and customers.
+// [RAW SQL] CHECK email = lower(email)
+// [RAW SQL] CHECK (user_type = 'STAFF' AND partner_id IS NULL) OR (user_type = 'PARTNER_USER' AND partner_id IS NOT NULL) OR user_type = 'CUSTOMER'
+model User {
+  id                 String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userType           UserType        @map("user_type")
+  email              String          @unique
+  phone              String?
+  name               String
+  passwordHash       String          @map("password_hash") // argon2id
+  status             UserStatus      @default(PENDING_VERIFICATION)
+  emailVerifiedAt    DateTime?       @map("email_verified_at") @db.Timestamptz(6)
+  phoneVerifiedAt    DateTime?       @map("phone_verified_at") @db.Timestamptz(6)
+  mustChangePassword Boolean         @default(false) @map("must_change_password")
+  passwordChangedAt  DateTime?       @map("password_changed_at") @db.Timestamptz(6)
+  failedLoginCount   Int             @default(0) @map("failed_login_count")
+  lockedUntil        DateTime?       @map("locked_until") @db.Timestamptz(6)
+  lastLoginAt        DateTime?       @map("last_login_at") @db.Timestamptz(6)
+  lastLoginIp        String?         @map("last_login_ip")
+  // 2FA: the secret is NOT here (see UserTwoFactor). This is a fast-read mirror of "has ACTIVE method".
+  twoFactorEnabled   Boolean         @default(false) @map("two_factor_enabled")
+  twoFactorPolicy    TwoFactorPolicy @default(INHERIT) @map("two_factor_policy")
+  // Bumped when roles / permissions / overrides / status / 2FA state change. Tokens carry it.
+  permissionVersion  Int             @default(1) @map("permission_version")
+  locale             String          @default("en")
+  timezone           String          @default("Asia/Dhaka")
+  avatarUrl          String?         @map("avatar_url")
+  partnerId          String?         @map("partner_id") @db.Uuid
+  createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt          DateTime?       @map("deleted_at") @db.Timestamptz(6)
+
+  partner              Partner?                 @relation("PartnerUsers", fields: [partnerId], references: [id], onDelete: Restrict)
+  employee             Employee?
+  twoFactor            UserTwoFactor[]
+  recoveryCodes        UserRecoveryCode[]
+  roles                UserRole[]               @relation("UserRoleSubject")
+  roleAssignmentsMade  UserRole[]               @relation("UserRoleAssigner")
+  permissionOverrides  UserPermissionOverride[] @relation("OverrideSubject")
+  overridesCreated     UserPermissionOverride[] @relation("OverrideCreator")
+  refreshTokens        RefreshToken[]
+  userTokens           UserToken[]
+  activityLogs         ActivityLog[]
+  partnersApproved     Partner[]                @relation("PartnerApprover")
+  creditLinesGranted   CreditLine[]
+  supplierCredsCreated SupplierCredential[]
+  settingsUpdated      SystemSetting[]
+  ledgerTxnsCreated    LedgerTransaction[]      @relation("TxnCreator")
+  ledgerTxnsApproved   LedgerTransaction[]      @relation("TxnApprover")
+  apiLogs              ApiLog[]
+
+  @@index([userType, status])
+  @@index([partnerId])
+  @@map("users")
+}
+
+// TOTP (and future methods). Secret is envelope-encrypted (AES-256-GCM, DEK wrapped by KEK).
+// last_used_step gives replay protection: a code for an already-used 30s step is rejected.
+// [RAW SQL] partial unique: (user_id, method) WHERE status IN ('PENDING','ACTIVE')
+model UserTwoFactor {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String          @map("user_id") @db.Uuid
+  method         TwoFactorMethod @default(TOTP)
+  status         TwoFactorStatus @default(PENDING)
+  ciphertext     String
+  iv             String
+  authTag        String          @map("auth_tag")
+  encryptedDek   String          @map("encrypted_dek")
+  keyId          String          @map("key_id")
+  digits         Int             @default(6)
+  periodSeconds  Int             @default(30) @map("period_seconds")
+  algorithm      String          @default("SHA1")
+  lastUsedStep   BigInt?         @map("last_used_step")
+  failedAttempts Int             @default(0) @map("failed_attempts")
+  lockedUntil    DateTime?       @map("locked_until") @db.Timestamptz(6)
+  confirmedAt    DateTime?       @map("confirmed_at") @db.Timestamptz(6)
+  lastVerifiedAt DateTime?       @map("last_verified_at") @db.Timestamptz(6)
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@map("user_two_factor")
+}
+
+// One-time recovery codes (hashed). Shown once at enrolment / regeneration.
+model UserRecoveryCode {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  codeHash  String    @map("code_hash")
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, usedAt])
+  @@map("user_recovery_codes")
+}
+
+model Employee {
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeCode  String         @unique @default(dbgenerated("next_business_id('employee')")) @map("employee_code")
+  userId        String         @unique @map("user_id") @db.Uuid
+  departmentId  String?        @map("department_id") @db.Uuid
+  designationId String?        @map("designation_id") @db.Uuid
+  zoneId        String?        @map("zone_id") @db.Uuid
+  managerId     String?        @map("manager_id") @db.Uuid
+  status        EmployeeStatus @default(ACTIVE)
+  joinedOn      DateTime?      @map("joined_on") @db.Date
+  leftOn        DateTime?      @map("left_on") @db.Date
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  department  Department?  @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  designation Designation? @relation(fields: [designationId], references: [id], onDelete: Restrict)
+  zone        Zone?        @relation(fields: [zoneId], references: [id], onDelete: Restrict)
+  manager     Employee?    @relation("EmployeeManager", fields: [managerId], references: [id], onDelete: Restrict)
+  reports     Employee[]   @relation("EmployeeManager")
+
+  @@index([departmentId])
+  @@index([zoneId])
+  @@index([status])
+  @@map("employees")
+}
+
+model Department {
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code         String        @unique
+  name         String
+  description  String?
+  isActive     Boolean       @default(true) @map("is_active")
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  employees    Employee[]
+  designations Designation[]
+
+  @@map("departments")
+}
+
+model Designation {
+  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code         String      @unique
+  name         String
+  departmentId String?     @map("department_id") @db.Uuid
+  level        Int         @default(0)
+  isActive     Boolean     @default(true) @map("is_active")
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  department   Department? @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  employees    Employee[]
+
+  @@map("designations")
+}
+
+model Zone {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code        String     @unique
+  name        String
+  description String?
+  isActive    Boolean    @default(true) @map("is_active")
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  employees   Employee[]
+
+  @@map("zones")
+}
+
+// requires_two_factor: every holder of this role must have 2FA (SUPER_ADMIN, ADMIN,
+// FINANCE_MANAGER, OPERATIONS_MANAGER, TICKETING_MANAGER are seeded with true).
+// partner_id != NULL => custom role owned by that partner.
+// [RAW SQL] partial unique: (code) WHERE partner_id IS NULL ; (partner_id, code) WHERE partner_id IS NOT NULL
+model Role {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code              String
+  name              String
+  description       String?
+  scope             RoleScope
+  partnerId         String?   @map("partner_id") @db.Uuid
+  isSystem          Boolean   @default(false) @map("is_system")
+  isActive          Boolean   @default(true) @map("is_active")
+  requiresTwoFactor Boolean   @default(false) @map("requires_two_factor")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  partner     Partner?         @relation("PartnerCustomRoles", fields: [partnerId], references: [id], onDelete: Cascade)
+  permissions RolePermission[]
+  users       UserRole[]
+
+  @@index([scope])
+  @@map("roles")
+}
+
+// Catalogue of "module.action" codes, synced from shared/permissions.ts at boot.
+//   requires_two_factor   : a STAFF user holding it MUST have 2FA enrolled (account-level)
+//   requires_step_up      : the action needs a fresh password/TOTP confirmation (<= 10 min)
+//   requires_maker_checker: approver must differ from creator
+model Permission {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code                 String   @unique
+  module               String
+  action               String
+  description          String?
+  requiresTwoFactor    Boolean  @default(false) @map("requires_two_factor")
+  requiresStepUp       Boolean  @default(false) @map("requires_step_up")
+  requiresMakerChecker Boolean  @default(false) @map("requires_maker_checker")
+  isDeprecated         Boolean  @default(false) @map("is_deprecated")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  roles     RolePermission[]
+  overrides UserPermissionOverride[]
+
+  @@index([module])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String    @map("role_id") @db.Uuid
+  permissionId String    @map("permission_id") @db.Uuid
+  dataScope    DataScope @default(ALL) @map("data_scope")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  userId       String   @map("user_id") @db.Uuid
+  roleId       String   @map("role_id") @db.Uuid
+  assignedById String?  @map("assigned_by_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user       User  @relation("UserRoleSubject", fields: [userId], references: [id], onDelete: Cascade)
+  role       Role  @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  assignedBy User? @relation("UserRoleAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+model UserPermissionOverride {
+  userId       String           @map("user_id") @db.Uuid
+  permissionId String           @map("permission_id") @db.Uuid
+  effect       PermissionEffect
+  dataScope    DataScope        @default(ALL) @map("data_scope")
+  reason       String?
+  expiresAt    DateTime?        @map("expires_at") @db.Timestamptz(6)
+  createdById  String?          @map("created_by_id") @db.Uuid
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user       User       @relation("OverrideSubject", fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  createdBy  User?      @relation("OverrideCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@id([userId, permissionId])
+  @@map("user_permission_overrides")
+}
+
+model RefreshToken {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  familyId      String    @map("family_id") @db.Uuid
+  tokenHash     String    @unique @map("token_hash")
+  replacedById  String?   @map("replaced_by_id") @db.Uuid
+  mfaVerifiedAt DateTime? @map("mfa_verified_at") @db.Timestamptz(6) // session was 2FA-verified
+  userAgent     String?   @map("user_agent")
+  ipAddress     String?   @map("ip_address")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastUsedAt    DateTime? @map("last_used_at") @db.Timestamptz(6)
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokedReason String?   @map("revoked_reason")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model UserToken {
+  id        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String        @map("user_id") @db.Uuid
+  type      UserTokenType
+  tokenHash String        @unique @map("token_hash")
+  expiresAt DateTime      @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime?     @map("used_at") @db.Timestamptz(6)
+  ipAddress String?       @map("ip_address")
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@map("user_tokens")
+}
+
+// =============================================================================
+// 2. PARTNERS — hierarchy is depth-agnostic (closure table); depth limit is CONFIG
+// =============================================================================
+
+// parent_partner_id = adjacency (cheap "who is my parent").
+// partner_hierarchy  = closure table (cheap "all descendants / ancestors / is-in-my-tree").
+// Today's rule "two levels" = system_settings key partner.max_depth = 1, enforced by PartnersService
+// (+ [RAW SQL] hard safety ceiling CHECK depth BETWEEN 0 AND 8). Allowing deeper nesting later
+// means changing that setting; NO migration, NO data rewrite.
+// [RAW SQL] CHECK (partner_type='B2B_PARTNER' AND parent_partner_id IS NULL AND depth=0)
+//                 OR (partner_type='SUB_PARTNER' AND parent_partner_id IS NOT NULL AND depth>=1)
+// [RAW SQL] closure maintained in the same DB transaction as insert/re-parent (service + trigger test).
+model Partner {
+  id                   String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  partnerCode          String        @unique @default(dbgenerated("next_business_id('partner')")) @map("partner_code")
+  companyName          String        @map("company_name")
+  tradeName            String?       @map("trade_name")
+  ownerName            String        @map("owner_name")
+  email                String
+  phone                String
+  address              String?
+  city                 String?
+  country              String        @default("BD") @db.VarChar(2)
+  website              String?
+  tradeLicenseNo       String?       @map("trade_license_no")
+  taxId                String?       @map("tax_id")
+  partnerType          PartnerType   @default(B2B_PARTNER) @map("partner_type")
+  parentPartnerId      String?       @map("parent_partner_id") @db.Uuid
+  rootPartnerId        String?       @map("root_partner_id") @db.Uuid
+  depth                Int           @default(0)
+  status               PartnerStatus @default(REQUESTED)
+  statusReason         String?       @map("status_reason")
+  canCreateSubPartners Boolean       @default(false) @map("can_create_sub_partners")
+  settings             Json          @default("{}")
+  markupGroupId        String?       @map("markup_group_id") @db.Uuid
+  discountGroupId      String?       @map("discount_group_id") @db.Uuid
+  commissionGroupId    String?       @map("commission_group_id") @db.Uuid
+  requestedAt          DateTime      @default(now()) @map("requested_at") @db.Timestamptz(6)
+  approvedAt           DateTime?     @map("approved_at") @db.Timestamptz(6)
+  approvedById         String?       @map("approved_by_id") @db.Uuid
+  rejectedAt           DateTime?     @map("rejected_at") @db.Timestamptz(6)
+  suspendedAt          DateTime?     @map("suspended_at") @db.Timestamptz(6)
+  createdAt            DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  parent          Partner?      @relation("PartnerHierarchy", fields: [parentPartnerId], references: [id], onDelete: Restrict)
+  children        Partner[]     @relation("PartnerHierarchy")
+  rootPartner     Partner?      @relation("PartnerTree", fields: [rootPartnerId], references: [id], onDelete: Restrict)
+  treeMembers     Partner[]     @relation("PartnerTree")
+  approvedBy      User?         @relation("PartnerApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  markupGroup     PartnerGroup? @relation("PartnerMarkupGroup", fields: [markupGroupId], references: [id], onDelete: SetNull)
+  discountGroup   PartnerGroup? @relation("PartnerDiscountGroup", fields: [discountGroupId], references: [id], onDelete: SetNull)
+  commissionGroup PartnerGroup? @relation("PartnerCommissionGroup", fields: [commissionGroupId], references: [id], onDelete: SetNull)
+
+  ancestorLinks      PartnerHierarchy[]  @relation("ClosureDescendant")
+  descendantLinks    PartnerHierarchy[]  @relation("ClosureAncestor")
+  users              User[]              @relation("PartnerUsers")
+  customRoles        Role[]              @relation("PartnerCustomRoles")
+  ledgerAccounts     LedgerAccount[]
+  ledgerTransactions LedgerTransaction[]
+  ledgerEntries      LedgerEntry[]
+  creditLines        CreditLine[]        @relation("CreditLineOwner")
+  creditAllocations  CreditLine[]        @relation("CreditAllocatedFrom")
+  activityLogs       ActivityLog[]
+  apiLogs            ApiLog[]
+
+  @@index([status])
+  @@index([parentPartnerId])
+  @@index([rootPartnerId])
+  @@index([email])
+  @@map("partners")
+}
+
+// Closure table. Every partner has a row to itself (depth 0) plus one row per ancestor.
+// "All of partner P's tree" = WHERE ancestor_id = P ; "is X inside Y's tree" = one PK lookup.
+// This is what the PARTNER_TREE data scope uses. Works unchanged for any depth.
+model PartnerHierarchy {
+  ancestorId   String   @map("ancestor_id") @db.Uuid
+  descendantId String   @map("descendant_id") @db.Uuid
+  depth        Int
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  ancestor   Partner @relation("ClosureAncestor", fields: [ancestorId], references: [id], onDelete: Cascade)
+  descendant Partner @relation("ClosureDescendant", fields: [descendantId], references: [id], onDelete: Cascade)
+
+  @@id([ancestorId, descendantId])
+  @@index([descendantId])
+  @@map("partner_hierarchy")
+}
+
+model PartnerGroup {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code        String           @unique
+  name        String
+  groupType   PartnerGroupType @map("group_type")
+  description String?
+  isDefault   Boolean          @default(false) @map("is_default")
+  isActive    Boolean          @default(true) @map("is_active")
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  markupPartners     Partner[] @relation("PartnerMarkupGroup")
+  discountPartners   Partner[] @relation("PartnerDiscountGroup")
+  commissionPartners Partner[] @relation("PartnerCommissionGroup")
+
+  @@index([groupType])
+  @@map("partner_groups")
+}
+
+// =============================================================================
+// 3. SUPPLIERS & API LOGGING
+// =============================================================================
+
+// NON-secret configuration only. Anything credential-like lives in supplier_credentials.
+model Supplier {
+  id           String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code         String              @unique
+  name         String
+  type         SupplierType
+  status       SupplierStatus      @default(INACTIVE)
+  environment  SupplierEnvironment @default(MOCK)
+  isMock       Boolean             @default(true) @map("is_mock")
+  apiBaseUrl   String?             @map("api_base_url")
+  apiVersion   String?             @map("api_version")
+  currency     String              @default("BDT") @db.VarChar(3)
+  timeoutMs    Int                 @default(30000) @map("timeout_ms")
+  maxRetries   Int                 @default(2) @map("max_retries")
+  priority     Int                 @default(100)
+  capabilities Json                @default("{}")
+  config       Json                @default("{}") // NON-secret adapter options only (validated: no secret-like keys)
+  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  credentials SupplierCredential[]
+  apiLogs     ApiLog[]
+
+  @@index([type, status])
+  @@map("suppliers")
+}
+
+// All secrets (username, password, api key, tokens) are ONE encrypted JSON blob (AES-256-GCM,
+// per-record DEK wrapped by KEK). Plain columns hold only non-secret identifiers + a masked hint.
+// Never selected by any list/detail query (repository uses an explicit select without these
+// columns). Never present in any response schema. Decrypted only by CredentialVault.
+// [RAW SQL] partial unique: (supplier_id, environment) WHERE is_active
+// [RAW SQL] REVOKE SELECT (ciphertext, iv, auth_tag, encrypted_dek) from reporting/readonly roles
+model SupplierCredential {
+  id           String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  supplierId   String              @map("supplier_id") @db.Uuid
+  environment  SupplierEnvironment
+  version      Int                 @default(1)
+  isActive     Boolean             @default(true) @map("is_active")
+  ciphertext   String
+  iv           String
+  authTag      String              @map("auth_tag")
+  encryptedDek String              @map("encrypted_dek")
+  keyId        String              @map("key_id")
+  usernameHint String?             @map("username_hint")
+  agencyCode   String?             @map("agency_code")
+  pcc          String?
+  createdById  String?             @map("created_by_id") @db.Uuid
+  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  rotatedAt    DateTime?           @map("rotated_at") @db.Timestamptz(6)
+
+  supplier  Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  createdBy User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([supplierId, environment, version])
+  @@map("supplier_credentials")
+}
+
+model ApiLog {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  requestId       String       @map("request_id")
+  direction       ApiDirection @default(OUTBOUND)
+  supplierId      String?      @map("supplier_id") @db.Uuid
+  partnerId       String?      @map("partner_id") @db.Uuid
+  userId          String?      @map("user_id") @db.Uuid
+  operation       String
+  method          String
+  endpoint        String
+  requestedAt     DateTime     @default(now()) @map("requested_at") @db.Timestamptz(6)
+  respondedAt     DateTime?    @map("responded_at") @db.Timestamptz(6)
+  durationMs      Int?         @map("duration_ms")
+  httpStatus      Int?         @map("http_status")
+  success         Boolean?
+  requestPayload  Json?        @map("request_payload") // MASKED before insert
+  responsePayload Json?        @map("response_payload") // MASKED before insert
+  errorCode       String?      @map("error_code")
+  errorMessage    String?      @map("error_message")
+  retryCount      Int          @default(0) @map("retry_count")
+  isMock          Boolean      @default(false) @map("is_mock")
+
+  supplier Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  partner  Partner?  @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([requestId])
+  @@index([supplierId, requestedAt])
+  @@index([partnerId, requestedAt])
+  @@index([success, requestedAt])
+  @@map("api_logs")
+}
+
+// =============================================================================
+// 4. LEDGER / WALLET / CREDIT
+// =============================================================================
+
+// cached_balance & held_amount are MIRRORS maintained only inside LedgerService transactions
+// (row-locked) and proven by ledger_reconciliations. Balance is in the account's normal-side sign
+// (wallet: credits - debits).
+// [RAW SQL] partial unique: (account_type, currency) WHERE partner_id IS NULL
+// [RAW SQL] CHECK held_amount >= 0
+// [RAW SQL] CHECK platform accounts (partner_id IS NULL) <-> account_type <> 'PARTNER_WALLET'
+model LedgerAccount {
+  id            String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountNo     String              @unique @default(dbgenerated("next_business_id('ledger_account')")) @map("account_no")
+  accountType   LedgerAccountType   @map("account_type")
+  normalSide    EntrySide           @map("normal_side")
+  partnerId     String?             @map("partner_id") @db.Uuid
+  currency      String              @default("BDT") @db.VarChar(3)
+  cachedBalance Decimal             @default(0) @map("cached_balance") @db.Decimal(18, 2)
+  heldAmount    Decimal             @default(0) @map("held_amount") @db.Decimal(18, 2)
+  lastEntrySeq  BigInt              @default(0) @map("last_entry_seq")
+  version       Int                 @default(0)
+  status        LedgerAccountStatus @default(ACTIVE)
+  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  partner         Partner?               @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  entries         LedgerEntry[]
+  holds           WalletHold[]
+  reconciliations LedgerReconciliation[]
+
+  @@unique([partnerId, accountType, currency])
+  @@index([accountType])
+  @@map("ledger_accounts")
+}
+
+// idempotency_key: deterministic, business-derived, GLOBALLY unique, format
+//   "<action>:<referenceType>:<referenceUuid>:<step>"  e.g. "ticket:TICKET:6f1c…:charge"
+// Because referenceUuid belongs to exactly one partner, the key is implicitly partner-scoped.
+// fingerprint = SHA-256 of canonical (type, partner, currency, sorted entries). Same key + different
+// fingerprint => IDEMPOTENCY_KEY_REUSED error (never silently returns a different posting).
+// Only status transitions are allowed after insert: PENDING->POSTED|FAILED, POSTED->REVERSED.
+model LedgerTransaction {
+  id             String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  txnNo          String                  @unique @default(dbgenerated("next_business_id('ledger_txn')")) @map("txn_no")
+  type           LedgerTransactionType
+  status         LedgerTransactionStatus @default(PENDING)
+  partnerId      String?                 @map("partner_id") @db.Uuid
+  currency       String                  @default("BDT") @db.VarChar(3)
+  totalAmount    Decimal                 @map("total_amount") @db.Decimal(18, 2)
+  referenceType  LedgerReferenceType     @map("reference_type")
+  referenceId    String?                 @map("reference_id") @db.Uuid
+  referenceNo    String?                 @map("reference_no")
+  idempotencyKey String                  @unique @map("idempotency_key")
+  fingerprint    String
+  description    String
+  metadata       Json                    @default("{}")
+  reversalOfId   String?                 @unique @map("reversal_of_id") @db.Uuid
+  createdById    String?                 @map("created_by_id") @db.Uuid
+  approvedById   String?                 @map("approved_by_id") @db.Uuid
+  requestId      String?                 @map("request_id")
+  createdAt      DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  postedAt       DateTime?               @map("posted_at") @db.Timestamptz(6)
+
+  partner       Partner?           @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  createdBy     User?              @relation("TxnCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  approvedBy    User?              @relation("TxnApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  reversalOf    LedgerTransaction? @relation("TxnReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy    LedgerTransaction? @relation("TxnReversal")
+  entries       LedgerEntry[]
+  holdsCaptured WalletHold[]
+
+  @@index([partnerId, createdAt])
+  @@index([referenceType, referenceId])
+  @@index([referenceNo])
+  @@index([type, status])
+  @@map("ledger_transactions")
+}
+
+// IMMUTABLE. [RAW SQL] triggers block UPDATE/DELETE/TRUNCATE.
+// [RAW SQL] CHECK (debit >= 0 AND credit >= 0 AND ((debit = 0) <> (credit = 0)))
+// [RAW SQL] DEFERRED CONSTRAINT TRIGGER: SUM(debit) = SUM(credit) per transaction at COMMIT
+// [RAW SQL] TRIGGER wallet_floor: on a PARTNER_WALLET debit, balance_after >= -(active credit limit)
+//           else RAISE 'CREDIT_LIMIT_EXCEEDED'  (hard safety net under the service-level check)
+model LedgerEntry {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  transactionId String   @map("transaction_id") @db.Uuid
+  accountId     String   @map("account_id") @db.Uuid
+  partnerId     String?  @map("partner_id") @db.Uuid
+  accountSeq    BigInt   @map("account_seq")
+  debit         Decimal  @default(0) @db.Decimal(18, 2)
+  credit        Decimal  @default(0) @db.Decimal(18, 2)
+  balanceBefore Decimal  @map("balance_before") @db.Decimal(18, 2)
+  balanceAfter  Decimal  @map("balance_after") @db.Decimal(18, 2)
+  currency      String   @db.VarChar(3)
+  memo          String?
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  transaction LedgerTransaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  account     LedgerAccount     @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  partner     Partner?          @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+
+  @@unique([accountId, accountSeq])
+  @@index([transactionId])
+  @@index([partnerId, createdAt])
+  @@map("ledger_entries")
+}
+
+// Reservation of funds while a supplier call is in flight.
+// States: ACTIVE -> CAPTURED | RELEASED | EXPIRED   (terminal states never change).
+//  * expires_at        : sweeper expires ACTIVE holds past this time (FOR UPDATE SKIP LOCKED),
+//                        decrementing ledger_accounts.held_amount in the SAME transaction.
+//  * is_pinned         : booking is in UNKNOWN supplier state (timeout after request sent). Sweeper
+//                        SKIPS pinned holds and raises an alert; staff resolve (confirm/release).
+//  * max_expires_at    : extensions allowed (extension_count) but never past this hard cap.
+// [RAW SQL] CHECK amount > 0 ; CHECK (status='CAPTURED') = (captured_txn_id IS NOT NULL)
+model WalletHold {
+  id             String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId      String              @map("account_id") @db.Uuid
+  amount         Decimal             @db.Decimal(18, 2)
+  status         HoldStatus          @default(ACTIVE)
+  referenceType  LedgerReferenceType @map("reference_type")
+  referenceId    String?             @map("reference_id") @db.Uuid
+  referenceNo    String?             @map("reference_no")
+  idempotencyKey String              @unique @map("idempotency_key")
+  fingerprint    String
+  expiresAt      DateTime            @map("expires_at") @db.Timestamptz(6)
+  maxExpiresAt   DateTime            @map("max_expires_at") @db.Timestamptz(6)
+  extensionCount Int                 @default(0) @map("extension_count")
+  isPinned       Boolean             @default(false) @map("is_pinned")
+  pinnedReason   String?             @map("pinned_reason")
+  releaseReason  String?             @map("release_reason") // BOOKING_FAILED | EXPIRED | MANUAL | SUPPLIER_REJECTED
+  capturedTxnId  String?             @map("captured_txn_id") @db.Uuid
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  releasedAt     DateTime?           @map("released_at") @db.Timestamptz(6)
+
+  account     LedgerAccount      @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  capturedTxn LedgerTransaction? @relation(fields: [capturedTxnId], references: [id], onDelete: Restrict)
+
+  @@index([accountId, status])
+  @@index([status, expiresAt])
+  @@index([isPinned, status])
+  @@map("wallet_holds")
+}
+
+// Approved credit limit. Credit used/available are NEVER stored; they are derived:
+//   balance          = ledger_accounts.cached_balance (verified against entries)
+//   credit_used      = max(0, -balance)
+//   available_credit = max(0, credit_limit - credit_used)
+//   purchasing power = balance - held_amount + credit_limit     (e.g. 10,000 + 50,000 = 60,000)
+// [RAW SQL] CHECK credit_limit >= 0
+model CreditLine {
+  id                     String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  partnerId              String           @map("partner_id") @db.Uuid
+  currency               String           @default("BDT") @db.VarChar(3)
+  creditLimit            Decimal          @default(0) @map("credit_limit") @db.Decimal(18, 2)
+  status                 CreditLineStatus @default(ACTIVE)
+  allocatedFromPartnerId String?          @map("allocated_from_partner_id") @db.Uuid
+  validFrom              DateTime?        @map("valid_from") @db.Timestamptz(6)
+  validTo                DateTime?        @map("valid_to") @db.Timestamptz(6)
+  grantedById            String?          @map("granted_by_id") @db.Uuid
+  createdAt              DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  partner              Partner  @relation("CreditLineOwner", fields: [partnerId], references: [id], onDelete: Restrict)
+  allocatedFromPartner Partner? @relation("CreditAllocatedFrom", fields: [allocatedFromPartnerId], references: [id], onDelete: Restrict)
+  grantedBy            User?    @relation(fields: [grantedById], references: [id], onDelete: SetNull)
+
+  @@unique([partnerId, currency])
+  @@map("credit_lines")
+}
+
+model LedgerReconciliation {
+  id              String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId       String               @map("account_id") @db.Uuid
+  expectedBalance Decimal              @map("expected_balance") @db.Decimal(18, 2)
+  cachedBalance   Decimal              @map("cached_balance") @db.Decimal(18, 2)
+  expectedHeld    Decimal              @map("expected_held") @db.Decimal(18, 2) // SUM of ACTIVE holds
+  cachedHeld      Decimal              @map("cached_held") @db.Decimal(18, 2)
+  difference      Decimal              @db.Decimal(18, 2)
+  status          ReconciliationStatus
+  checkedAt       DateTime             @default(now()) @map("checked_at") @db.Timestamptz(6)
+
+  account LedgerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, checkedAt])
+  @@index([status])
+  @@map("ledger_reconciliations")
+}
+
+// =============================================================================
+// 5. AUDIT — append-only
+// =============================================================================
+
+// [RAW SQL] BEFORE UPDATE OR DELETE trigger raises; TRUNCATE trigger raises.
+// [RAW SQL] app role: GRANT INSERT, SELECT only (no UPDATE/DELETE/TRUNCATE). Retention is performed
+//           by a separate DBA-controlled role via partition detach/archive, never by the API.
+model ActivityLog {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  occurredAt     DateTime    @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  requestId      String?     @map("request_id")
+  actorType      ActorType   @default(USER) @map("actor_type")
+  actorUserId    String?     @map("actor_user_id") @db.Uuid
+  actorPartnerId String?     @map("actor_partner_id") @db.Uuid
+  action         String
+  module         String
+  entityType     String?     @map("entity_type")
+  entityId       String?     @map("entity_id")
+  entityRef      String?     @map("entity_ref")
+  oldValue       Json?       @map("old_value")
+  newValue       Json?       @map("new_value")
+  metadata       Json?
+  result         AuditResult @default(SUCCESS)
+  isSensitive    Boolean     @default(false) @map("is_sensitive") // action required step-up / maker-checker
+  ipAddress      String?     @map("ip_address")
+  userAgent      String?     @map("user_agent")
+
+  actorUser    User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  actorPartner Partner? @relation(fields: [actorPartnerId], references: [id], onDelete: SetNull)
+
+  @@index([occurredAt])
+  @@index([actorUserId, occurredAt])
+  @@index([actorPartnerId, occurredAt])
+  @@index([module, action, occurredAt])
+  @@index([entityType, entityId])
+  @@index([requestId])
+  @@index([isSensitive, occurredAt])
+  @@map("activity_logs")
+}
+
+// =============================================================================
+// 6. PLATFORM INFRASTRUCTURE
+// =============================================================================
+
+model SystemSetting {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key         String   @unique
+  category    String
+  value       Json
+  valueType   String   @default("string") @map("value_type")
+  description String?
+  isPublic    Boolean  @default(false) @map("is_public")
+  updatedById String?  @map("updated_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  updatedBy User? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([category])
+  @@map("system_settings")
+}
+
+// Configurable business-ID formats. Template tokens: {YYYY} {YY} {SEQ}.
+//   partner         "AQ-B{SEQ}"            pad 6   -> AQ-B000001
+//   invoice         "AQ-INV-{SEQ}"         pad 6   -> AQ-INV-000001   (initial)
+//                   "AQ-INV-{YYYY}-{SEQ}"  YEARLY  -> AQ-INV-2026-000001 (switch later via config only)
+// NOT gapless (sequences skip on rollback) — accepted. Changing a template never rewrites old IDs.
+model BusinessIdConfig {
+  key          String        @id
+  template     String
+  padWidth     Int           @map("pad_width")
+  sequenceName String        @map("sequence_name")
+  resetPolicy  IdResetPolicy @default(NEVER) @map("reset_policy")
+  isActive     Boolean       @default(true) @map("is_active")
+  description  String?
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("business_id_config")
+}
+
+// Client-retryable commands. Scoped by WHO (user or partner) and WHAT (action):
+//   UNIQUE (scope_type, scope_id, action, key)
+// so the same client key can never collide across partners/users or across different actions.
+// Same key + different request_hash => 422 IDEMPOTENCY_KEY_REUSED.
+// IN_PROGRESS rows carry locked_until so a crashed request does not block retries forever.
+model IdempotencyKey {
+  id             String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scopeType      IdempotencyScopeType @map("scope_type")
+  scopeId        String               @map("scope_id") @db.Uuid
+  action         String // booking.create | deposit.request | refund.request ...
+  key            String
+  requestHash    String               @map("request_hash")
+  status         IdempotencyStatus    @default(IN_PROGRESS)
+  lockedUntil    DateTime?            @map("locked_until") @db.Timestamptz(6)
+  responseStatus Int?                 @map("response_status")
+  responseBody   Json?                @map("response_body")
+  resourceType   String?              @map("resource_type")
+  resourceId     String?              @map("resource_id")
+  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt      DateTime             @map("expires_at") @db.Timestamptz(6)
+
+  @@unique([scopeType, scopeId, action, key])
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+}
+
+model OutboxEvent {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  topic         String
+  aggregateType String       @map("aggregate_type")
+  aggregateId   String       @map("aggregate_id")
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  attempts      Int          @default(0)
+  availableAt   DateTime     @default(now()) @map("available_at") @db.Timestamptz(6)
+  publishedAt   DateTime?    @map("published_at") @db.Timestamptz(6)
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([status, availableAt])
+  @@map("outbox_events")
+}
